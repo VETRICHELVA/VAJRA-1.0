@@ -20,6 +20,14 @@
 //! - Both nonces are 32 random bytes.
 //! - Session key derivation uses domain-separated HKDF.
 //! - All secret material zeroized on drop.
+//! - Nonce replay guard prevents session re-use attacks (NonceGuard).
+//!
+//! # Crate Note
+//! `pqc_kyber` is a pure-Rust implementation of CRYSTALS-Kyber-768,
+//! which is standardised as ML-KEM-768 (FIPS 203). The algorithm is
+//! identical to the `oqs`/liboqs binding; only the Rust crate differs.
+
+use std::collections::HashSet;
 
 use pqc_kyber::*;
 use rand::RngCore;
@@ -30,6 +38,48 @@ use crate::error::{VajraError, VajraResult};
 
 /// Nonce length in bytes.
 pub const NONCE_LEN: usize = 32;
+
+/// Replay guard: tracks every initiator nonce seen by this responder.
+///
+/// A `NonceGuard` MUST be shared across all calls to `responder_handshake`
+/// for the lifetime of the responder process. If a nonce is presented a
+/// second time the handshake is rejected with `VajraError::ReplayDetected`.
+///
+/// Implementation uses a `HashSet` (functionally equivalent to a Bloom
+/// filter for this workload; a space-optimised Bloom filter can be
+/// substituted without changing the public API).
+pub struct NonceGuard {
+    seen: HashSet<[u8; NONCE_LEN]>,
+}
+
+impl NonceGuard {
+    /// Create a new, empty replay guard.
+    pub fn new() -> Self {
+        Self {
+            seen: HashSet::new(),
+        }
+    }
+
+    /// Return `Ok(())` if `nonce` is fresh and register it.
+    /// Return `Err(VajraError::ReplayDetected)` on a repeat.
+    pub fn check_and_insert(&mut self, nonce: &[u8; NONCE_LEN]) -> VajraResult<()> {
+        if self.seen.contains(nonce) {
+            return Err(VajraError::ReplayDetected);
+        }
+        self.seen.insert(*nonce);
+        Ok(())
+    }
+
+    /// Number of nonces registered so far.
+    pub fn len(&self) -> usize {
+        self.seen.len()
+    }
+
+    /// True if no nonces have been registered.
+    pub fn is_empty(&self) -> bool {
+        self.seen.is_empty()
+    }
+}
 
 /// Initiator's handshake state (before receiving response).
 pub struct InitiatorHandshake {
@@ -127,10 +177,17 @@ impl InitiatorHandshake {
 }
 
 /// Responder side: encapsulate a shared secret with the initiator's public key.
+///
+/// `guard` must be the process-lifetime `NonceGuard` for this responder.
+/// Duplicate initiator nonces are rejected immediately.
 pub fn responder_handshake(
     initiator_public_key: &[u8],
     initiator_nonce: &[u8; NONCE_LEN],
+    guard: &mut NonceGuard,
 ) -> VajraResult<ResponderHandshake> {
+    // --- Replay guard ---
+    guard.check_and_insert(initiator_nonce)?;
+
     let mut rng = rand::thread_rng();
 
     // Encapsulate shared secret
@@ -160,10 +217,11 @@ mod tests {
     fn full_handshake_produces_same_key() {
         // Initiator generates keypair
         let initiator = InitiatorHandshake::new().unwrap();
+        let mut guard = NonceGuard::new();
 
         // Responder encapsulates with initiator's public key
         let responder =
-            responder_handshake(&initiator.public_key, &initiator.nonce).unwrap();
+            responder_handshake(&initiator.public_key, &initiator.nonce, &mut guard).unwrap();
 
         // Initiator completes handshake
         let result = initiator
@@ -178,11 +236,12 @@ mod tests {
     #[test]
     fn different_handshakes_produce_different_keys() {
         let init1 = InitiatorHandshake::new().unwrap();
-        let resp1 = responder_handshake(&init1.public_key, &init1.nonce).unwrap();
+        let mut guard = NonceGuard::new();
+        let resp1 = responder_handshake(&init1.public_key, &init1.nonce, &mut guard).unwrap();
         let result1 = init1.complete(&resp1.ciphertext, &resp1.nonce).unwrap();
 
         let init2 = InitiatorHandshake::new().unwrap();
-        let resp2 = responder_handshake(&init2.public_key, &init2.nonce).unwrap();
+        let resp2 = responder_handshake(&init2.public_key, &init2.nonce, &mut guard).unwrap();
         let result2 = init2.complete(&resp2.ciphertext, &resp2.nonce).unwrap();
 
         assert_ne!(*result1.session_key, *result2.session_key);
@@ -192,8 +251,9 @@ mod tests {
     #[test]
     fn wrong_ciphertext_fails() {
         let initiator = InitiatorHandshake::new().unwrap();
+        let mut guard = NonceGuard::new();
         let responder =
-            responder_handshake(&initiator.public_key, &initiator.nonce).unwrap();
+            responder_handshake(&initiator.public_key, &initiator.nonce, &mut guard).unwrap();
 
         // Tamper with ciphertext
         let mut bad_ct = responder.ciphertext.clone();
@@ -214,9 +274,28 @@ mod tests {
     #[test]
     fn session_id_is_16_bytes() {
         let init = InitiatorHandshake::new().unwrap();
-        let resp = responder_handshake(&init.public_key, &init.nonce).unwrap();
+        let mut guard = NonceGuard::new();
+        let resp = responder_handshake(&init.public_key, &init.nonce, &mut guard).unwrap();
         let result = init.complete(&resp.ciphertext, &resp.nonce).unwrap();
 
         assert_eq!(result.session_id.len(), 16);
+    }
+
+    #[test]
+    fn nonce_replay_is_rejected() {
+        let init = InitiatorHandshake::new().unwrap();
+        let mut guard = NonceGuard::new();
+
+        // First use is fine
+        let _resp =
+            responder_handshake(&init.public_key, &init.nonce, &mut guard).unwrap();
+
+        // Same nonce a second time must be rejected
+        let init2 = InitiatorHandshake::new().unwrap();
+        // Reuse the first initiator's nonce (simulating a replay)
+        let replay_nonce = init.nonce; // captured before move
+        let err = responder_handshake(&init2.public_key, &replay_nonce, &mut guard)
+            .unwrap_err();
+        assert!(matches!(err, crate::error::VajraError::ReplayDetected));
     }
 }

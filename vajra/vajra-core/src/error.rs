@@ -75,6 +75,10 @@ pub enum VajraError {
     #[error("Handshake failed: {0}")]
     HandshakeFailed(String),
 
+    /// Initiator nonce was already seen — replay attack rejected.
+    #[error("Replay detected: initiator nonce already seen")]
+    ReplayDetected,
+
     /// Requested session ID not found in session table.
     #[error("Session not found: {0}")]
     SessionNotFound(u64),

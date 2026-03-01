@@ -12,10 +12,28 @@ All real benchmark numbers come from Rust Criterion benchmarks.
 
 import streamlit as st
 import time
+import os
+import glob
 
 from components.ratchet_panel import render_ratchet_panel
 from components.shamir_panel import render_shamir_panel
 from components.canary_panel import render_canary_panel
+
+
+def _load_latest_benchmark_report():
+    """Load the newest benchmark report markdown, if present."""
+    results_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "results"))
+    pattern = os.path.join(results_dir, "vajra_benchmark_report_*.md")
+    candidates = glob.glob(pattern)
+    if not candidates:
+        return None, None
+    latest = max(candidates, key=os.path.getmtime)
+    try:
+        with open(latest, "r", encoding="utf-8") as f:
+            content = f.read()
+        return latest, content
+    except OSError:
+        return None, None
 
 # ── Page Configuration ───────────────────────────────────────────
 
@@ -152,6 +170,23 @@ with col2:
 
 with col3:
     render_canary_panel()
+
+# ── Benchmark Report (auto-load latest) ───────────────────────
+
+st.markdown("---")
+st.markdown("### 📈 Latest Benchmark Report")
+
+report_path, report_md = _load_latest_benchmark_report()
+if report_md:
+    st.markdown(
+        f"Loaded: **{os.path.basename(report_path)}**",
+    )
+    st.markdown(report_md)
+else:
+    st.info(
+        "No benchmark report found. Run `bash scripts/run_benchmark.sh` in the repo root, "
+        "then refresh this page. Reports are written to /workspaces/VAJRA-1.0/results/."
+    )
 
 # ── Bottom Metrics Bar ──────────────────────────────────────────
 
