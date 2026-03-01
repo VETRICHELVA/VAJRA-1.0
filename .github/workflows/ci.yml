@@ -1,0 +1,176 @@
+name: VAJRA CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-C target-cpu=native"
+
+jobs:
+  # ── Rust: check, lint, test ───────────────────────────────────────────────
+  rust:
+    name: Rust (${{ matrix.toolchain }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, nightly]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust ${{ matrix.toolchain }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            vajra/target
+          key: ${{ runner.os }}-cargo-${{ matrix.toolchain }}-${{ hashFiles('vajra/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.toolchain }}-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev \
+            libclang-dev cmake
+
+      - name: Cargo fmt (stable only)
+        if: matrix.toolchain == 'stable'
+        working-directory: vajra
+        run: cargo fmt --all -- --check
+
+      - name: Cargo check
+        working-directory: vajra
+        run: cargo check --workspace --all-targets
+
+      - name: Cargo clippy
+        working-directory: vajra
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Cargo test (release)
+        working-directory: vajra
+        run: cargo test --workspace --release 2>&1 | tee ../test_results.txt
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.toolchain }}
+          path: test_results.txt
+
+  # ── Rust: benchmarks (compile + dry-run, stable only) ────────────────────
+  bench:
+    name: Benchmarks (compile check)
+    runs-on: ubuntu-latest
+    needs: rust
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            vajra/target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('vajra/Cargo.lock') }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev \
+            libclang-dev cmake
+
+      - name: Install cargo-criterion
+        run: cargo install cargo-criterion --locked
+
+      - name: Compile benchmarks (no run)
+        working-directory: vajra
+        run: cargo bench --workspace --no-run
+
+  # ── Full benchmark run on self-hosted AMD (manual trigger only) ──────────
+  bench-full:
+    name: Full Benchmarks (AMD EPYC)
+    runs-on: ubuntu-latest
+    needs: bench
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev \
+            libclang-dev cmake
+
+      - name: Run all benchmarks
+        working-directory: vajra
+        run: |
+          RUSTFLAGS="-C target-cpu=native" \
+          cargo bench --workspace 2>&1 | tee ../bench_results.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: |
+            bench_results.txt
+            vajra/target/criterion/
+
+  # ── Python: dashboard lint & import check ─────────────────────────────────
+  dashboard:
+    name: Dashboard (Python 3.12)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: vajra/vajra-dashboard/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r vajra/vajra-dashboard/requirements.txt
+
+      - name: Syntax check all dashboard files
+        run: |
+          python -m py_compile vajra/vajra-dashboard/app.py
+          python -m py_compile vajra/vajra-dashboard/components/ratchet_panel.py
+          python -m py_compile vajra/vajra-dashboard/components/shamir_panel.py
+          python -m py_compile vajra/vajra-dashboard/components/canary_panel.py
+          echo "All dashboard files: syntax OK"
+
+      - name: Import check
+        run: |
+          python -c "import streamlit, plotly.graph_objects, numpy, pandas, cryptography; print('All imports OK')"
