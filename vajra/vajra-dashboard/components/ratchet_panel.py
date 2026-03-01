@@ -23,6 +23,9 @@ def _generate_key():
 
 def _init_state():
     """Initialize ratchet panel state."""
+    # Ensure shared counter exists even when panel is used standalone
+    st.session_state.setdefault("total_rotations", 0)
+
     if "ratchet_keys" not in st.session_state:
         st.session_state.ratchet_keys = []
         # Generate initial key chain

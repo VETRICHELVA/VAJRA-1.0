@@ -12,6 +12,9 @@ import streamlit as st
 
 def _init_state():
     """Initialize Shamir panel state."""
+    # Ensure shared counters exist even when panel is used standalone
+    st.session_state.setdefault("sessions_active", 1)
+
     if "shamir_paths" not in st.session_state:
         st.session_state.shamir_paths = {
             "ISP-A": "active",

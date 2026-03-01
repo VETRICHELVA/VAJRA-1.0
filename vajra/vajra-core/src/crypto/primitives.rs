@@ -154,7 +154,7 @@ pub fn hkdf_derive(
 #[inline]
 pub fn hmac_compute(key: &[u8; KEY_LEN], data: &[u8]) -> [u8; HMAC_LEN] {
     let mut mac =
-        Hmac::<Sha256>::new_from_slice(key).expect("HMAC key length is always valid at 32 bytes");
+        <Hmac<Sha256> as KeyInit>::new_from_slice(key).expect("HMAC key length is always valid at 32 bytes");
     mac.update(data);
     let result = mac.finalize();
     let mut output = [0u8; HMAC_LEN];
@@ -190,7 +190,7 @@ mod tests {
     fn aes_gcm_roundtrip() {
         let key = random_key();
         let nonce = derive_nonce(&key, 0).unwrap();
-        let plaintext = b"VAJRA test payload — quantum safe";
+        let plaintext = b"VAJRA test payload -- quantum safe";
         let aad = b"session-metadata";
 
         let ciphertext = aes_gcm_encrypt(&key, &nonce, plaintext, aad).unwrap();

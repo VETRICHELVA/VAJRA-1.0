@@ -8,3 +8,4 @@ description = "VAJRA commercial TLS wrapper"
 vajra-core = { path = "../vajra-core" }
 thiserror = "1.0"
 tracing = "0.1"
+rand = { version = "0.8", features = ["getrandom"] }

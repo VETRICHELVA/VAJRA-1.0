@@ -319,12 +319,13 @@ mod tests {
         let mut r1 = LivingRatchet::new(initial, config1);
         let mut r2 = LivingRatchet::new(initial, config2);
 
-        // First packet same (no ratchet yet on counter 0)
+        // First packet: PerPacket ratchets immediately,
+        // session_id is mixed into HKDF info, so keys already diverge.
         let (k1_0, _) = r1.advance().unwrap();
         let (k2_0, _) = r2.advance().unwrap();
-        assert_eq!(*k1_0, *k2_0); // initial key, no ratchet yet
+        assert_ne!(*k1_0, *k2_0); // different session_id → different key after ratchet
 
-        // After ratchet, keys diverge
+        // Second advance: still diverged
         let (k1_1, _) = r1.advance().unwrap();
         let (k2_1, _) = r2.advance().unwrap();
         assert_ne!(*k1_1, *k2_1);

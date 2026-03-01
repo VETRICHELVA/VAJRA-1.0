@@ -1,0 +1,10 @@
+# Rust build artifacts
+vajra/target/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store

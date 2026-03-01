@@ -17,6 +17,10 @@ import streamlit as st
 
 def _init_state():
     """Initialize canary panel state."""
+    # Ensure shared counters exist even when panel is used standalone
+    st.session_state.setdefault("breaches_detected", 0)
+    st.session_state.setdefault("total_packets", 0)
+
     if "canary_timings" not in st.session_state:
         # Generate baseline timing data (~10ms ± small jitter)
         st.session_state.canary_timings = [
@@ -27,6 +31,8 @@ def _init_state():
         st.session_state.canary_alert_active = False
         st.session_state.canary_alert_msg = ""
         st.session_state.canary_alert_sigma = 0.0
+        # Flag to avoid counting the same breach on every re-render
+        st.session_state.canary_breach_counted = False
 
 
 def _compute_z_score(timings, value):
@@ -68,7 +74,7 @@ def render_canary_panel():
     # Anomaly zones (red shading)
     fig.add_hrect(
         y0=threshold_upper,
-        y1=max(timings) + 10,
+        y1=max(max(timings), threshold_upper) + 10,
         fillcolor="rgba(255, 48, 48, 0.1)",
         line_width=0,
     )
@@ -130,8 +136,11 @@ def render_canary_panel():
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # Alert display
+    # Alert display — only count each new breach once, not on every re-render
     if st.session_state.canary_alert_active:
+        if not st.session_state.get("canary_breach_counted", False):
+            st.session_state.breaches_detected += 1
+            st.session_state.canary_breach_counted = True
         st.markdown(
             f'<div class="breach-alert">'
             f'⚠ <b>TIMING ANOMALY DETECTED</b><br>'
@@ -141,7 +150,6 @@ def render_canary_panel():
             f'</div>',
             unsafe_allow_html=True,
         )
-        st.session_state.breaches_detected += 1
 
     # Controls
     col_a, col_b, col_c = st.columns(3)
@@ -165,6 +173,8 @@ def render_canary_panel():
             st.session_state.canary_alert_msg = (
                 f"Packet #{st.session_state.canary_next_id - 1}"
             )
+            # Reset counted flag so this new breach gets counted once
+            st.session_state.canary_breach_counted = False
 
             # Keep last 50 entries
             st.session_state.canary_timings = st.session_state.canary_timings[-50:]
@@ -183,6 +193,7 @@ def render_canary_panel():
                 st.session_state.total_packets += 1
 
             st.session_state.canary_alert_active = False
+            st.session_state.canary_breach_counted = False
             st.session_state.canary_timings = st.session_state.canary_timings[-50:]
             st.session_state.canary_packet_ids = st.session_state.canary_packet_ids[-50:]
             st.rerun()
@@ -197,7 +208,7 @@ def render_canary_panel():
         f'<div style="font-family: monospace; font-size: 0.85em; color: #8899aa;">'
         f'Mean: {mean_timing:.2f}ms | '
         f'StdDev: {std_timing:.2f}ms | '
-        f'3σ threshold: {threshold_upper:.2f}ms'
+        f'3&#963; threshold: {threshold_upper:.2f}ms'
         f'</div>',
         unsafe_allow_html=True,
     )
