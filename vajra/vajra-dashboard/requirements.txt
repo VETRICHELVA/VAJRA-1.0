@@ -1,6 +1,7 @@
-streamlit==1.31.0
-cryptography==42.0.0
-pycryptodome==3.20.0
-pandas==2.2.0
-plotly==5.18.0
-numpy==1.26.0
+# Python 3.13 compatible versions (all have pre-built wheels)
+streamlit==1.43.0
+cryptography==44.0.2
+pycryptodome==3.21.0
+pandas==2.2.3
+plotly==5.24.1
+numpy==2.2.3
