@@ -1,0 +1,10 @@
+[package]
+name = "vajra-commercial"
+version = "0.1.0"
+edition = "2021"
+description = "VAJRA commercial TLS wrapper"
+
+[dependencies]
+vajra-core = { path = "../vajra-core" }
+thiserror = "1.0"
+tracing = "0.1"

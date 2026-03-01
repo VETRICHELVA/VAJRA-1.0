@@ -1,0 +1,32 @@
+[package]
+name = "vajra-bench"
+version = "0.1.0"
+edition = "2021"
+description = "VAJRA benchmark suite"
+
+[dependencies]
+vajra-core = { path = "../vajra-core" }
+rand = { version = "0.8", features = ["getrandom"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "primitives"
+harness = false
+
+[[bench]]
+name = "ratchet"
+harness = false
+
+[[bench]]
+name = "shamir"
+harness = false
+
+[[bench]]
+name = "canary"
+harness = false
+
+[[bench]]
+name = "full_stack"
+harness = false

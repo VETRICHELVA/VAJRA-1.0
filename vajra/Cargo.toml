@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "vajra-core",
+    "vajra-commercial",
+    "vajra-bench",
+    "vajra-cli",
+]
+resolver = "2"
